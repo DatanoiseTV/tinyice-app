@@ -1,0 +1,52 @@
+# Flutter/Dart
+.dart_tool/
+.pub/
+.pub-cache/
+.flutter-plugins-dependencies
+.packages
+.flutter-plugins
+build/
+coverage/
+
+# iOS
+ios/Pods/
+ios/Podfile.lock
+ios/.symlinks/
+ios/build/
+*.framework
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# macOS
+macos/Pods/
+macos/Podfile.lock
+macos/.symlinks/
+macos/build/
+
+# Android
+android/.gradle/
+android/app/build/
+android/build/
+android/captures/
+*.jks
+*.keystore
+
+# Web
+web/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test/Dev
+*.png
+devtools_options.yaml
