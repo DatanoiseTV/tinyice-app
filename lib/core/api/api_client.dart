@@ -55,6 +55,8 @@ class TinyIceApiClient {
     if (_sessionCookie != null) {
       headers['Cookie'] = _sessionCookie!;
     }
+    headers['Referer'] = '$baseUrl/admin';
+    headers['Origin'] = baseUrl;
     return headers;
   }
 
@@ -262,48 +264,58 @@ class TinyIceApiClient {
       String endpoint;
       switch (action) {
         case 'toggle':
-          endpoint = Endpoints.streamerToggle;
+          endpoint = Endpoints.playerToggle;
           break;
         case 'next':
-          endpoint = Endpoints.streamerNext;
+          endpoint = Endpoints.playerNext;
+          debugPrint('[API] Using next endpoint: $endpoint');
           break;
         case 'prev':
-          endpoint = '/streamer/prev';
+          endpoint = Endpoints.playerPrev;
           break;
         case 'shuffle':
-          endpoint = Endpoints.streamerShuffle;
+          endpoint = Endpoints.playerShuffle;
           break;
         case 'loop':
-          endpoint = Endpoints.streamerLoop;
+          endpoint = Endpoints.playerLoop;
           break;
         case 'restart':
-          endpoint = Endpoints.streamerRestart;
+          endpoint = Endpoints.playerRestart;
+          debugPrint('[API] Using restart endpoint: $endpoint');
           break;
         case 'scan':
-          endpoint = Endpoints.streamerScan;
+          endpoint = Endpoints.playerScan;
           break;
         case 'clear_queue':
-          endpoint = Endpoints.streamerClearQueue;
+          endpoint = Endpoints.playerClearQueue;
+          debugPrint('[API] Using clear_queue endpoint: $endpoint');
           break;
         case 'save_playlist':
-          endpoint = Endpoints.streamerSavePlaylist;
+          endpoint = Endpoints.playerSavePlaylist;
+          break;
+        case 'clear_playlist':
+          endpoint = Endpoints.playerClearPlaylist;
           break;
         default:
           return false;
       }
 
+      debugPrint('[API] Using endpoint: $endpoint with mount: $mount');
+      final formData = FormData();
+      formData.fields.add(MapEntry('mount', mount));
+      formData.fields.add(MapEntry('csrf', _csrfToken ?? ''));
+
       final response = await _dio.post(
-        '$endpoint?mount=$mount',
+        endpoint,
+        data: formData,
         options: Options(
           headers: _authHeaders,
-          followRedirects: false,
+          followRedirects: true,
           validateStatus: (status) => status != null && status < 400,
         ),
       );
       debugPrint('[API] toggleStreamer result: status=${response.statusCode}');
-      return response.statusCode == 302 ||
-          response.statusCode == 303 ||
-          response.statusCode == 200;
+      return response.statusCode == 200;
     } catch (e) {
       debugPrint('[API] toggleStreamer error: $e');
       return false;
@@ -384,6 +396,32 @@ class TinyIceApiClient {
       );
       return response.statusCode == 302 || response.statusCode == 200;
     } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> updateMount({
+    required String mount,
+    String? password,
+    String? fallback,
+    bool? visible,
+  }) async {
+    try {
+      final data = {
+        'mount': mount,
+        if (password != null) 'password': password,
+        if (fallback != null) 'fallback': fallback,
+        if (visible != null) 'visible': visible,
+      };
+      final response = await _dio.post(
+        Endpoints.mountUpdate,
+        data: json.encode(data),
+        options: Options(
+          headers: {..._authHeaders, 'Content-Type': 'application/json'},
+        ),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
       return false;
     }
   }
@@ -764,9 +802,290 @@ class TinyIceApiClient {
     }
   }
 
+  Future<bool> stopWebRTCSource(String mount) async {
+    try {
+      final response = await _dio.post(
+        '${Endpoints.webrtcSourceStop}?mount=${Uri.encodeComponent(mount)}',
+        options: Options(headers: _authHeaders),
+      );
+      return response.statusCode == 200 || response.statusCode == 204;
+    } catch (_) {
+      return false;
+    }
+  }
+
   String getStreamUrl(String mount) {
     final uri = Uri.parse(baseUrl);
     final scheme = uri.scheme == 'https' ? 'https' : 'http';
     return '$scheme://${uri.host}:$uri.port$mount';
+  }
+
+  Future<bool> addAutoDJ({
+    required String name,
+    required String mount,
+    String? musicDir,
+    String format = 'mp3',
+    int bitrate = 128,
+    bool enabled = true,
+    bool loop = true,
+    bool injectMetadata = true,
+    bool mpdEnabled = false,
+    String? mpdPort,
+    String? mpdPassword,
+  }) async {
+    try {
+      final data = {
+        'name': name,
+        'mount': mount,
+        if (musicDir != null) 'music_dir': musicDir,
+        'format': format,
+        'bitrate': bitrate,
+        'enabled': enabled,
+        'loop': loop,
+        'inject_metadata': injectMetadata,
+        'mpd_enabled': mpdEnabled,
+        if (mpdPort != null) 'mpd_port': mpdPort,
+        if (mpdPassword != null) 'mpd_password': mpdPassword,
+      };
+      final response = await _dio.post(
+        Endpoints.autodjAdd,
+        data: json.encode(data),
+        options: Options(
+          headers: {..._authHeaders, 'Content-Type': 'application/json'},
+        ),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> editAutoDJ({
+    required String name,
+    required String mount,
+    String? musicDir,
+    String format = 'mp3',
+    int bitrate = 128,
+    bool enabled = true,
+    bool loop = true,
+    bool injectMetadata = true,
+    bool mpdEnabled = false,
+    String? mpdPort,
+    String? mpdPassword,
+  }) async {
+    try {
+      final data = {
+        'name': name,
+        'mount': mount,
+        if (musicDir != null) 'music_dir': musicDir,
+        'format': format,
+        'bitrate': bitrate,
+        'enabled': enabled,
+        'loop': loop,
+        'inject_metadata': injectMetadata,
+        'mpd_enabled': mpdEnabled,
+        if (mpdPort != null) 'mpd_port': mpdPort,
+        if (mpdPassword != null) 'mpd_password': mpdPassword,
+      };
+      final response = await _dio.post(
+        Endpoints.autodjEdit,
+        data: json.encode(data),
+        options: Options(
+          headers: {..._authHeaders, 'Content-Type': 'application/json'},
+        ),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> removeAutoDJ(String mount) async {
+    try {
+      final response = await _dio.post(
+        '${Endpoints.autodjRemove}?mount=${Uri.encodeComponent(mount)}',
+        options: Options(headers: _authHeaders),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getEvents() async {
+    try {
+      final response = await _dio.get(
+        Endpoints.events,
+        options: Options(headers: _authHeaders),
+      );
+      if (response.statusCode == 200 && response.data is List) {
+        return List<Map<String, dynamic>>.from(response.data);
+      }
+      return [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getPublicEvents() async {
+    try {
+      final response = await _dio.get(Endpoints.publicEvents);
+      if (response.statusCode == 200 && response.data is List) {
+        return List<Map<String, dynamic>>.from(response.data);
+      }
+      return [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> getLegacyStats() async {
+    try {
+      final response = await _dio.get(Endpoints.legacyStats);
+      if (response.statusCode == 200) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getInsights() async {
+    try {
+      final response = await _dio.get(
+        Endpoints.insights,
+        options: Options(headers: _authHeaders),
+      );
+      if (response.statusCode == 200) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<bool> toggleLatency() async {
+    try {
+      final response = await _dio.post(
+        Endpoints.latencyToggle,
+        options: Options(headers: _authHeaders),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> hotSwap(String fromMount, String toMount) async {
+    try {
+      final response = await _dio.post(
+        '${Endpoints.hotSwap}?from=${Uri.encodeComponent(fromMount)}&to=${Uri.encodeComponent(toMount)}',
+        options: Options(headers: _authHeaders),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> loadPlaylist(String mount, String playlistName) async {
+    try {
+      final response = await _dio.post(
+        '${Endpoints.streamerLoadPlaylist}?mount=${Uri.encodeComponent(mount)}&name=${Uri.encodeComponent(playlistName)}',
+        options: Options(headers: _authHeaders),
+      );
+      return response.statusCode == 200 || response.statusCode == 302;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> clearPlaylist(String mount) async {
+    try {
+      final response = await _dio.post(
+        '${Endpoints.streamerClearPlaylist}?mount=${Uri.encodeComponent(mount)}',
+        options: Options(headers: _authHeaders),
+      );
+      return response.statusCode == 200 || response.statusCode == 302;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<List<MusicFile>> getMusicFiles(String mount, {String? path}) async {
+    try {
+      final queryParams = <String, dynamic>{'mount': mount};
+      if (path != null) queryParams['path'] = path;
+
+      final response = await _dio.get(
+        Endpoints.playerFiles,
+        queryParameters: queryParams,
+        options: Options(headers: _authHeaders),
+      );
+      if (response.statusCode == 200 && response.data is List) {
+        return (response.data as List)
+            .map((e) => MusicFile.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+      return [];
+    } catch (e) {
+      debugPrint('[API] getMusicFiles error: $e');
+      return [];
+    }
+  }
+
+  Future<bool> addToQueue(String mount, String filePath) async {
+    try {
+      debugPrint('[API] addToQueue: mount=$mount, path=$filePath');
+      final formData = FormData();
+      formData.fields.add(MapEntry('mount', mount));
+      formData.fields.add(MapEntry('path', filePath));
+      formData.fields.add(MapEntry('action', 'add'));
+      formData.fields.add(MapEntry('csrf', _csrfToken ?? ''));
+
+      final response = await _dio.post(
+        Endpoints.playerQueue,
+        data: formData,
+        options: Options(
+          headers: _authHeaders,
+          followRedirects: true,
+          validateStatus: (status) => status != null && status < 400,
+        ),
+      );
+      debugPrint('[API] addToQueue result: status=${response.statusCode}');
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('[API] addToQueue error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> addToPlaylist(String mount, String filePath) async {
+    try {
+      debugPrint('[API] addToPlaylist: mount=$mount, file=$filePath');
+      final formData = FormData();
+      formData.fields.add(MapEntry('mount', mount));
+      formData.fields.add(MapEntry('file', filePath));
+      formData.fields.add(MapEntry('action', 'add'));
+      formData.fields.add(MapEntry('csrf', _csrfToken ?? ''));
+
+      debugPrint('[API] addToPlaylist formData fields: ${formData.fields}');
+      final response = await _dio.post(
+        Endpoints.playerPlaylistAction,
+        data: formData,
+        options: Options(
+          headers: _authHeaders,
+          followRedirects: true,
+          validateStatus: (status) => status != null && status < 400,
+        ),
+      );
+      debugPrint('[API] addToPlaylist result: status=${response.statusCode}');
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('[API] addToPlaylist error: $e');
+      return false;
+    }
   }
 }

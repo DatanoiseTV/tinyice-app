@@ -25,6 +25,8 @@ class _GoLiveScreenState extends ConsumerState<GoLiveScreen> {
   final _mountController = TextEditingController(text: '/live');
   double _audioLevel = 0;
   Timer? _levelTimer;
+  MediaStream? _previewStream;
+  RTCPeerConnection? _previewPc;
 
   @override
   void initState() {
@@ -41,40 +43,45 @@ class _GoLiveScreenState extends ConsumerState<GoLiveScreen> {
   }
 
   Future<void> _initDevices() async {
-    if (Platform.isIOS) {
-      setState(() {
-        _audioInputs = [];
-      });
-      return;
-    }
-
     try {
-      String status = await FlutterMacosPermissions.microphoneStatus();
-      debugPrint('Microphone permission status: $status');
+      if (Platform.isMacOS) {
+        String status = await FlutterMacosPermissions.microphoneStatus();
+        debugPrint('Microphone permission status: $status');
 
-      if (status == 'denied' || status == 'notDetermined') {
-        final granted = await FlutterMacosPermissions.requestMicrophone();
-        debugPrint('Microphone permission granted: $granted');
-        if (!granted) {
+        if (status == 'denied' || status == 'notDetermined') {
+          final granted = await FlutterMacosPermissions.requestMicrophone();
+          debugPrint('Microphone permission granted: $granted');
+          if (!granted) {
+            setState(() {
+              _audioInputs = [];
+            });
+            return;
+          }
+        } else if (status == 'restricted') {
           setState(() {
             _audioInputs = [];
           });
           return;
         }
-      } else if (status == 'restricted') {
-        setState(() {
-          _audioInputs = [];
-        });
-        return;
       }
 
       final devices = await navigator.mediaDevices.enumerateDevices();
+      debugPrint(
+        'Enumerated devices: ${devices.map((d) => '${d.kind}: ${d.label}').join(', ')}',
+      );
       setState(() {
-        _audioInputs = devices.where((d) => d.kind == 'audioInput').toList();
+        _audioInputs = devices
+            .where((d) => d.kind?.toLowerCase() == 'audioinput')
+            .toList();
+        debugPrint(
+          'Audio inputs: ${_audioInputs.length} - ${_audioInputs.map((d) => d.label).join(', ')}',
+        );
         if (_audioInputs.isNotEmpty) {
           _selectedDeviceId = _audioInputs.first.deviceId;
         }
       });
+
+      await _startPreview();
     } catch (e) {
       debugPrint('Error getting devices or permission: $e');
       setState(() {
@@ -83,8 +90,77 @@ class _GoLiveScreenState extends ConsumerState<GoLiveScreen> {
     }
   }
 
+  Future<void> _startPreview() async {
+    if (_previewStream != null) return;
+
+    try {
+      _previewStream = await navigator.mediaDevices.getUserMedia({
+        'audio': _selectedDeviceId != null
+            ? {
+                'deviceId': {'exact': _selectedDeviceId},
+              }
+            : {
+                'echoCancellation': false,
+                'noiseSuppression': false,
+                'autoGainControl': false,
+              },
+        'video': false,
+      });
+
+      _previewPc = await createPeerConnection({
+        'iceServers': [
+          {'urls': 'stun:stun.l.google.com:19302'},
+        ],
+      });
+
+      _previewStream!.getAudioTracks().forEach((track) {
+        _previewPc!.addTrack(track, _previewStream!);
+      });
+
+      final offer = await _previewPc!.createOffer();
+      await _previewPc!.setLocalDescription(offer);
+
+      _startAudioMonitoring(_previewStream!, _previewPc!);
+    } catch (e) {
+      debugPrint('Error starting preview: $e');
+    }
+  }
+
+  void _startAudioMonitoring(MediaStream stream, RTCPeerConnection pc) {
+    _levelTimer?.cancel();
+    _levelTimer = Timer.periodic(const Duration(milliseconds: 50), (_) async {
+      if (!mounted) return;
+
+      try {
+        double maxLevel = 0;
+        final stats = await pc.getStats();
+        for (final report in stats) {
+          if (report.type == 'media-source') {
+            final level = report.values['audioLevel'];
+            if (level != null) {
+              final db = double.tryParse(level.toString()) ?? 0;
+              maxLevel = db.clamp(0.0, 1.0);
+            }
+          }
+        }
+
+        setState(() {
+          _audioLevel = maxLevel > 0.001 ? maxLevel : (_audioLevel * 0.9);
+        });
+      } catch (e) {
+        setState(() {
+          _audioLevel *= 0.9;
+        });
+      }
+    });
+  }
+
   Future<void> _startBroadcast() async {
     if (_isLive || _isStarting) return;
+
+    _levelTimer?.cancel();
+    _previewStream?.getTracks().forEach((track) => track.stop());
+    _previewStream = null;
 
     setState(() {
       _isStarting = true;
@@ -155,7 +231,7 @@ class _GoLiveScreenState extends ConsumerState<GoLiveScreen> {
         ),
       );
 
-      _startAudioLevelMonitoring();
+      _startAudioMonitoring(_localStream!, _pc!);
 
       setState(() {
         _isLive = true;
@@ -173,55 +249,22 @@ class _GoLiveScreenState extends ConsumerState<GoLiveScreen> {
     }
   }
 
-  void _startAudioLevelMonitoring() {
-    _levelTimer = Timer.periodic(const Duration(milliseconds: 50), (_) async {
-      if (_localStream == null || !_isLive || _pc == null) return;
-
-      try {
-        double maxLevel = 0;
-
-        final senders = await _pc!.getSenders();
-        for (final sender in senders) {
-          if (sender.track?.kind == 'audio') {
-            final stats = await sender.getStats();
-            for (final report in stats) {
-              if (report.type == 'outbound-rtp') {
-                final level = report.values['audioLevel'];
-                if (level != null) {
-                  final db = double.tryParse(level.toString()) ?? -100;
-                  if (db > -100) {
-                    maxLevel = ((db + 100) / 100).clamp(0.0, 1.0);
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        if (mounted) {
-          setState(() {
-            _audioLevel = maxLevel > 0.01 ? maxLevel : (_audioLevel * 0.7);
-          });
-        }
-      } catch (e) {
-        if (mounted) {
-          setState(() {
-            _audioLevel = _audioLevel * 0.7;
-          });
-        }
-      }
-    });
-  }
-
   void _stopBroadcast() {
     _levelTimer?.cancel();
     _levelTimer = null;
 
-    _localStream?.getTracks().forEach((track) => track.stop());
+    _localStream?.getTracks().forEach((track) {
+      track.stop();
+    });
     _localStream = null;
 
     _pc?.close();
     _pc = null;
+
+    final client = ref.read(apiClientProvider);
+    if (client != null && _mountController.text.isNotEmpty) {
+      client.stopWebRTCSource(_mountController.text);
+    }
 
     if (mounted) {
       setState(() {
@@ -231,6 +274,8 @@ class _GoLiveScreenState extends ConsumerState<GoLiveScreen> {
         _audioLevel = 0;
       });
     }
+
+    _startPreview();
   }
 
   @override
@@ -297,17 +342,35 @@ class _GoLiveScreenState extends ConsumerState<GoLiveScreen> {
   }
 
   Widget _buildVisualization() {
-    return Container(
-      height: 200,
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.surfaceLight),
-      ),
-      child: CustomPaint(
-        painter: _SpectrumPainter(level: _audioLevel),
-        size: const Size(double.infinity, 200),
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'MIC LEVEL',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textMuted,
+            letterSpacing: 1,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 40,
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.surfaceLight),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: CustomPaint(
+              painter: _VuMeterPainter(level: _audioLevel),
+              size: const Size(double.infinity, 40),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -349,7 +412,9 @@ class _GoLiveScreenState extends ConsumerState<GoLiveScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'No microphone found. On simulator, audio input is not available. Test on a real device.',
+                      Platform.isIOS
+                          ? 'No microphone found. Please ensure microphone access is granted in Settings.'
+                          : 'No microphone found. On simulator, audio input is not available. Test on a real device.',
                       style: TextStyle(fontSize: 12, color: AppColors.warning),
                     ),
                   ),
@@ -424,49 +489,64 @@ class _GoLiveScreenState extends ConsumerState<GoLiveScreen> {
   }
 
   Widget _buildGoLiveButton() {
-    return SizedBox(
-      height: 56,
-      child: ElevatedButton(
-        onPressed: _isStarting
-            ? null
-            : () {
-                if (_isLive) {
-                  _stopBroadcast();
-                } else {
-                  _startBroadcast();
-                }
-              },
-        style: ElevatedButton.styleFrom(
-          backgroundColor: _isLive ? AppColors.error : AppColors.primary,
-          foregroundColor: _isLive ? Colors.white : Colors.black,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(28),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'BROADCAST',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textMuted,
+            letterSpacing: 1,
           ),
-          elevation: 8,
-          shadowColor: (_isLive ? AppColors.error : AppColors.primary)
-              .withAlpha(77),
         ),
-        child: _isStarting
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(_isLive ? Icons.stop : Icons.radio),
-                  const SizedBox(width: 8),
-                  Text(
-                    _isLive ? 'STOP BROADCAST' : 'GO LIVE',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 56,
+          child: ElevatedButton(
+            onPressed: _isStarting
+                ? null
+                : () {
+                    if (_isLive) {
+                      _stopBroadcast();
+                    } else {
+                      _startBroadcast();
+                    }
+                  },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isLive ? AppColors.error : AppColors.primary,
+              foregroundColor: _isLive ? Colors.white : Colors.black,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(28),
               ),
-      ),
+              elevation: 8,
+              shadowColor: (_isLive ? AppColors.error : AppColors.primary)
+                  .withAlpha(77),
+            ),
+            child: _isStarting
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(_isLive ? Icons.stop : Icons.radio),
+                      const SizedBox(width: 8),
+                      Text(
+                        _isLive ? 'STOP BROADCAST' : 'GO LIVE',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -504,41 +584,42 @@ class _GoLiveScreenState extends ConsumerState<GoLiveScreen> {
   }
 }
 
-class _SpectrumPainter extends CustomPainter {
+class _VuMeterPainter extends CustomPainter {
   final double level;
 
-  _SpectrumPainter({required this.level});
+  _VuMeterPainter({required this.level});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..style = PaintingStyle.fill
-      ..strokeCap = StrokeCap.round;
+    final bgRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      const Radius.circular(8),
+    );
 
-    const barCount = 32;
-    final barWidth = size.width / barCount - 2;
+    canvas.drawRRect(bgRect, Paint()..color = const Color(0xFF1A1A1A));
 
-    for (int i = 0; i < barCount; i++) {
-      final x = i * (barWidth + 2);
-      final barHeight = level > 0
-          ? (level * size.height * (0.3 + (i / barCount) * 0.7))
-          : 4.0;
+    final levelWidth = size.width * level.clamp(0.0, 1.0);
+    final levelRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(0, 0, levelWidth, size.height),
+      const Radius.circular(8),
+    );
 
-      final hue = 180 + (i / barCount) * 60;
-      paint.color = HSLColor.fromAHSL(1, hue, 1, 0.5).toColor();
+    final gradient = LinearGradient(
+      colors: [AppColors.success, Colors.orange, AppColors.error],
+      stops: const [0.0, 0.7, 1.0],
+    );
 
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(x, size.height - barHeight, barWidth, barHeight),
-          const Radius.circular(2),
+    canvas.drawRRect(
+      levelRect,
+      Paint()
+        ..shader = gradient.createShader(
+          Rect.fromLTWH(0, 0, size.width, size.height),
         ),
-        paint,
-      );
-    }
+    );
   }
 
   @override
-  bool shouldRepaint(covariant _SpectrumPainter oldDelegate) {
+  bool shouldRepaint(covariant _VuMeterPainter oldDelegate) {
     return oldDelegate.level != level;
   }
 }

@@ -7,6 +7,8 @@ import '../../shared/widgets/widgets.dart';
 import '../../shared/providers/server_providers.dart';
 import '../auth/auth_provider.dart';
 import '../dashboard/dashboard_screen.dart';
+import '../../core/api/api_client.dart';
+import 'file_browser_screen.dart';
 
 class StreamerScreen extends ConsumerStatefulWidget {
   const StreamerScreen({super.key});
@@ -32,10 +34,13 @@ class _StreamerScreenState extends ConsumerState<StreamerScreen> {
   Future<void> _nextTrack(String mount) async {
     final client = ref.read(apiClientProvider);
     final success = await client?.toggleStreamer(mount, 'next');
-    ref.invalidate(serverStatsProvider);
-    if (mounted) {
+    ref.refresh(serverStatsProvider);
+    if (mounted && success == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(success == true ? 'Skipped' : 'Action failed')),
+        const SnackBar(
+          content: Text('Skipped'),
+          duration: Duration(milliseconds: 500),
+        ),
       );
     }
   }
@@ -43,34 +48,36 @@ class _StreamerScreenState extends ConsumerState<StreamerScreen> {
   Future<void> _prevTrack(String mount) async {
     final client = ref.read(apiClientProvider);
     final success = await client?.toggleStreamer(mount, 'prev');
-    ref.invalidate(serverStatsProvider);
-    if (mounted) {
+    ref.refresh(serverStatsProvider);
+    if (mounted && success == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(success == true ? 'Previous' : 'Action failed')),
+        const SnackBar(
+          content: Text('Previous'),
+          duration: Duration(milliseconds: 500),
+        ),
       );
     }
   }
 
   Future<void> _toggleShuffle(String mount) async {
-    final client = ref.read(apiClientProvider);
-    final success = await client?.toggleStreamer(mount, 'shuffle');
-    ref.invalidate(serverStatsProvider);
+    await ref.read(apiClientProvider)?.toggleStreamer(mount, 'shuffle');
+    ref.refresh(serverStatsProvider);
   }
 
   Future<void> _toggleLoop(String mount) async {
-    final client = ref.read(apiClientProvider);
-    final success = await client?.toggleStreamer(mount, 'loop');
-    ref.invalidate(serverStatsProvider);
+    await ref.read(apiClientProvider)?.toggleStreamer(mount, 'loop');
+    ref.refresh(serverStatsProvider);
   }
 
   Future<void> _restart(String mount) async {
     final client = ref.read(apiClientProvider);
     final success = await client?.toggleStreamer(mount, 'restart');
-    ref.invalidate(serverStatsProvider);
-    if (mounted) {
+    ref.refresh(serverStatsProvider);
+    if (mounted && success == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success == true ? 'Restarted' : 'Action failed'),
+        const SnackBar(
+          content: Text('Restarted'),
+          duration: Duration(milliseconds: 500),
         ),
       );
     }
@@ -79,11 +86,12 @@ class _StreamerScreenState extends ConsumerState<StreamerScreen> {
   Future<void> _scan(String mount) async {
     final client = ref.read(apiClientProvider);
     final success = await client?.toggleStreamer(mount, 'scan');
-    ref.invalidate(serverStatsProvider);
-    if (mounted) {
+    ref.refresh(serverStatsProvider);
+    if (mounted && success == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success == true ? 'Scanning...' : 'Action failed'),
+        const SnackBar(
+          content: Text('Scanning...'),
+          duration: Duration(milliseconds: 500),
         ),
       );
     }
@@ -92,11 +100,12 @@ class _StreamerScreenState extends ConsumerState<StreamerScreen> {
   Future<void> _clearQueue(String mount) async {
     final client = ref.read(apiClientProvider);
     final success = await client?.toggleStreamer(mount, 'clear_queue');
-    ref.invalidate(serverStatsProvider);
-    if (mounted) {
+    ref.refresh(serverStatsProvider);
+    if (mounted && success == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success == true ? 'Queue cleared' : 'Action failed'),
+        const SnackBar(
+          content: Text('Queue cleared'),
+          duration: Duration(milliseconds: 500),
         ),
       );
     }
@@ -105,14 +114,213 @@ class _StreamerScreenState extends ConsumerState<StreamerScreen> {
   Future<void> _savePlaylist(String mount) async {
     final client = ref.read(apiClientProvider);
     final success = await client?.toggleStreamer(mount, 'save_playlist');
-    ref.invalidate(serverStatsProvider);
-    if (mounted) {
+    ref.refresh(serverStatsProvider);
+    if (mounted && success == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success == true ? 'Playlist saved' : 'Action failed'),
+        const SnackBar(
+          content: Text('Playlist saved'),
+          duration: Duration(milliseconds: 500),
         ),
       );
     }
+  }
+
+  void _openFileBrowser(String mount) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => FileBrowserScreen(mount: mount)),
+    );
+  }
+
+  void _showAddAutoDJDialog(BuildContext context) {
+    final nameController = TextEditingController();
+    final mountController = TextEditingController(text: '/autodj');
+    final musicDirController = TextEditingController();
+    final bitrateController = TextEditingController(text: '128');
+    String selectedFormat = 'mp3';
+    bool enabled = true;
+    bool loop = true;
+    bool injectMetadata = true;
+    bool mpdEnabled = false;
+    final mpdPortController = TextEditingController();
+    final mpdPasswordController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(dialogContext).viewInsets.bottom,
+          ),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Add AutoDJ',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Name'),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: mountController,
+                    decoration: const InputDecoration(labelText: 'Mount Point'),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: musicDirController,
+                    decoration: const InputDecoration(
+                      labelText: 'Music Directory (optional)',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    value: selectedFormat,
+                    decoration: const InputDecoration(labelText: 'Format'),
+                    items: const [
+                      DropdownMenuItem(value: 'mp3', child: Text('MP3')),
+                      DropdownMenuItem(value: 'ogg', child: Text('OGG')),
+                      DropdownMenuItem(value: 'opus', child: Text('Opus')),
+                    ],
+                    onChanged: (v) => setModalState(() => selectedFormat = v!),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: bitrateController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Bitrate (kbps)',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SwitchListTile(
+                    title: const Text('Enabled'),
+                    value: enabled,
+                    onChanged: (v) => setModalState(() => enabled = v),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  SwitchListTile(
+                    title: const Text('Loop'),
+                    value: loop,
+                    onChanged: (v) => setModalState(() => loop = v),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  SwitchListTile(
+                    title: const Text('Inject Metadata'),
+                    value: injectMetadata,
+                    onChanged: (v) => setModalState(() => injectMetadata = v),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const Divider(),
+                  SwitchListTile(
+                    title: const Text('Enable MPD'),
+                    value: mpdEnabled,
+                    onChanged: (v) => setModalState(() => mpdEnabled = v),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  if (mpdEnabled) ...[
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: mpdPortController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'MPD Port'),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: mpdPasswordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'MPD Password',
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        if (nameController.text.isEmpty ||
+                            mountController.text.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Name and Mount Point are required',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        final client = ref.read(apiClientProvider);
+                        final bitrate =
+                            int.tryParse(bitrateController.text) ?? 128;
+                        final success = await client?.addAutoDJ(
+                          name: nameController.text,
+                          mount: mountController.text,
+                          musicDir: musicDirController.text.isEmpty
+                              ? null
+                              : musicDirController.text,
+                          format: selectedFormat,
+                          bitrate: bitrate,
+                          enabled: enabled,
+                          loop: loop,
+                          injectMetadata: injectMetadata,
+                          mpdEnabled: mpdEnabled,
+                          mpdPort: mpdPortController.text.isEmpty
+                              ? null
+                              : mpdPortController.text,
+                          mpdPassword: mpdPasswordController.text.isEmpty
+                              ? null
+                              : mpdPasswordController.text,
+                        );
+                        if (dialogContext.mounted) {
+                          Navigator.pop(dialogContext);
+                          ref.invalidate(serverStatsProvider);
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                success == true
+                                    ? 'AutoDJ added successfully'
+                                    : 'Failed to add AutoDJ',
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      child: const Text('Add AutoDJ'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   void _showEditAutoDJDialog(
@@ -165,6 +373,15 @@ class _StreamerScreenState extends ConsumerState<StreamerScreen> {
   ) {
     final nameController = TextEditingController(text: streamer.name);
     final mountController = TextEditingController(text: streamer.mount);
+    final musicDirController = TextEditingController();
+    final bitrateController = TextEditingController(text: '128');
+    String selectedFormat = 'mp3';
+    bool enabled = true;
+    bool loop = true;
+    bool injectMetadata = true;
+    bool mpdEnabled = false;
+    final mpdPortController = TextEditingController();
+    final mpdPasswordController = TextEditingController();
 
     showModalBottomSheet(
       context: context,
@@ -173,53 +390,189 @@ class _StreamerScreenState extends ConsumerState<StreamerScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Edit: ${streamer.mount}',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(labelText: 'Name'),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: mountController,
-                  decoration: const InputDecoration(labelText: 'Mount Point'),
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: () async {
-                      // Note: Backend would need update endpoint
-                      // For now just show a message
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('AutoDJ update not implemented in API'),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(dialogContext).viewInsets.bottom,
+          ),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Edit: ${streamer.mount}',
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
                         ),
-                      );
-                    },
-                    child: const Text('Save Changes'),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Name'),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: mountController,
+                    decoration: const InputDecoration(labelText: 'Mount Point'),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: musicDirController,
+                    decoration: const InputDecoration(
+                      labelText: 'Music Directory (optional)',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    value: selectedFormat,
+                    decoration: const InputDecoration(labelText: 'Format'),
+                    items: const [
+                      DropdownMenuItem(value: 'mp3', child: Text('MP3')),
+                      DropdownMenuItem(value: 'ogg', child: Text('OGG')),
+                      DropdownMenuItem(value: 'opus', child: Text('Opus')),
+                    ],
+                    onChanged: (v) => setModalState(() => selectedFormat = v!),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: bitrateController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Bitrate (kbps)',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SwitchListTile(
+                    title: const Text('Enabled'),
+                    value: enabled,
+                    onChanged: (v) => setModalState(() => enabled = v),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  SwitchListTile(
+                    title: const Text('Loop'),
+                    value: loop,
+                    onChanged: (v) => setModalState(() => loop = v),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  SwitchListTile(
+                    title: const Text('Inject Metadata'),
+                    value: injectMetadata,
+                    onChanged: (v) => setModalState(() => injectMetadata = v),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const Divider(),
+                  SwitchListTile(
+                    title: const Text('Enable MPD'),
+                    value: mpdEnabled,
+                    onChanged: (v) => setModalState(() => mpdEnabled = v),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  if (mpdEnabled) ...[
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: mpdPortController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'MPD Port'),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: mpdPasswordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'MPD Password',
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            final client = ref.read(apiClientProvider);
+                            final success = await client?.removeAutoDJ(
+                              streamer.mount,
+                            );
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext);
+                              ref.invalidate(serverStatsProvider);
+                              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    success == true
+                                        ? 'AutoDJ removed'
+                                        : 'Failed to remove AutoDJ',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.error,
+                          ),
+                          child: const Text('Remove'),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            final client = ref.read(apiClientProvider);
+                            final bitrate =
+                                int.tryParse(bitrateController.text) ?? 128;
+                            final success = await client?.editAutoDJ(
+                              name: nameController.text,
+                              mount: mountController.text,
+                              musicDir: musicDirController.text.isEmpty
+                                  ? null
+                                  : musicDirController.text,
+                              format: selectedFormat,
+                              bitrate: bitrate,
+                              enabled: enabled,
+                              loop: loop,
+                              injectMetadata: injectMetadata,
+                              mpdEnabled: mpdEnabled,
+                              mpdPort: mpdPortController.text.isEmpty
+                                  ? null
+                                  : mpdPortController.text,
+                              mpdPassword: mpdPasswordController.text.isEmpty
+                                  ? null
+                                  : mpdPasswordController.text,
+                            );
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext);
+                              ref.invalidate(serverStatsProvider);
+                              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    success == true
+                                        ? 'AutoDJ updated successfully'
+                                        : 'Failed to update AutoDJ',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                          child: const Text('Save Changes'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -236,6 +589,10 @@ class _StreamerScreenState extends ConsumerState<StreamerScreen> {
       appBar: AppBar(
         title: const Text('AutoDJ'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () => _showAddAutoDJDialog(context),
+          ),
           if (statsAsync.value != null &&
               statsAsync.value!.streamers.isNotEmpty)
             IconButton(
@@ -250,9 +607,28 @@ class _StreamerScreenState extends ConsumerState<StreamerScreen> {
         error: (error, _) => ErrorView(message: error.toString()),
         data: (stats) {
           if (stats.streamers.isEmpty) {
-            return const EmptyState(
-              icon: Icons.play_circle_outline,
-              title: 'No AutoDJ Configured',
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.play_circle_outline,
+                    size: 64,
+                    color: AppColors.textMuted,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No AutoDJ Configured',
+                    style: TextStyle(fontSize: 18, color: AppColors.textMuted),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: () => _showAddAutoDJDialog(context),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add AutoDJ'),
+                  ),
+                ],
+              ),
             );
           }
 
@@ -391,6 +767,11 @@ class _StreamerScreenState extends ConsumerState<StreamerScreen> {
                         icon: Icons.queue_music,
                         label: 'Clear Q',
                         onTap: () => _clearQueue(streamer.mount),
+                      ),
+                      _ActionBtn(
+                        icon: Icons.folder_open,
+                        label: 'Library',
+                        onTap: () => _openFileBrowser(streamer.mount),
                       ),
                       _ActionBtn(
                         icon: Icons.restart_alt,

@@ -158,13 +158,26 @@ class _StreamsScreenState extends ConsumerState<StreamsScreen> {
                   height: 48,
                   child: ElevatedButton(
                     onPressed: () async {
-                      // Note: Need backend endpoint for updating mount
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Mount update not implemented in API'),
-                        ),
+                      final client = ref.read(apiClientProvider);
+                      final success = await client?.updateMount(
+                        mount: stream.mount,
+                        fallback: fallbackController.text.isEmpty
+                            ? null
+                            : fallbackController.text,
                       );
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                        ref.invalidate(streamsProvider);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              success == true
+                                  ? 'Mount updated'
+                                  : 'Failed to update mount',
+                            ),
+                          ),
+                        );
+                      }
                     },
                     child: const Text('Save Changes'),
                   ),

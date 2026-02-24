@@ -598,3 +598,29 @@ class ServerConnection {
     );
   }
 }
+
+class MusicFile {
+  final String name;
+  final String path;
+  final bool isDirectory;
+  final int? size;
+  final String? duration;
+
+  MusicFile({
+    required this.name,
+    required this.path,
+    required this.isDirectory,
+    this.size,
+    this.duration,
+  });
+
+  factory MusicFile.fromJson(Map<String, dynamic> json) {
+    return MusicFile(
+      name: json['name'] ?? '',
+      path: json['path'] ?? '',
+      isDirectory: json['is_directory'] ?? json['isDir'] ?? false,
+      size: json['size'],
+      duration: json['duration'],
+    );
+  }
+}
